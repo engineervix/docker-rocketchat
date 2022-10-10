@@ -1,0 +1,62 @@
+version: "3.7"
+
+services:
+  rocketchat:
+    image: rocket.chat:4.8.4
+    container_name: rocketchat-app
+    depends_on:
+      - mongodb
+    restart: "${DOCKER_RESTART_POLICY:-unless-stopped}"
+    volumes:
+      - rocketchat-media-data:/app/uploads
+    networks:
+      - rocketchat
+    environment:
+      PORT: ${PORT:-3000}
+      ROOT_URL: "https://${ROCKETCHAT_HOST}"
+      MONGO_URL: "${MONGO_URL:-mongodb://mongodb:27017/rocketchat?replicaSet=rs0}"
+      MONGO_OPLOG_URL: "${MONGO_OPLOG_URL:-mongodb://mongodb:27017/local?replicaSet=rs0}"
+
+  mongodb:
+    image: bitnami/mongodb:4.4.15
+    container_name: rocketchat-db
+    restart: "${DOCKER_RESTART_POLICY:-unless-stopped}"
+    volumes:
+      - rocketchat-db-data:/data/mongodb
+    networks:
+      - rocketchat
+    environment:
+      MONGODB_REPLICA_SET_MODE: ${MONGODB_REPLICA_SET_MODE:-primary}
+      MONGODB_REPLICA_SET_NAME: ${MONGODB_REPLICA_SET_NAME:-rs0}
+      MONGODB_PORT_NUMBER: ${MONGODB_PORT_NUMBER:-27017}
+      MONGODB_INITIAL_PRIMARY_HOST: ${MONGODB_INITIAL_PRIMARY_HOST:-mongodb}
+      MONGODB_INITIAL_PRIMARY_PORT_NUMBER: ${MONGODB_INITIAL_PRIMARY_PORT_NUMBER:-7017}
+      MONGODB_ADVERTISED_HOSTNAME: ${MONGODB_ADVERTISED_HOSTNAME:-mongodb}
+      MONGODB_ENABLE_JOURNAL: ${MONGODB_ENABLE_JOURNAL:-true}
+      ALLOW_EMPTY_PASSWORD: ${ALLOW_EMPTY_PASSWORD:-yes}
+
+  rocketchat-gateway:
+    image: nginx:1.19-alpine
+    container_name: rocketchat-gateway
+    restart: "${DOCKER_RESTART_POLICY:-unless-stopped}"
+    volumes:
+      - ./rocketchat-gateway/rocketchat.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - rocketchat
+      - backend
+    depends_on:
+      - rocketchat
+    environment:
+      VIRTUAL_HOST: "${VIRTUAL_HOST}"
+      LETSENCRYPT_HOST: "${LETSENCRYPT_HOST}"
+      LETSENCRYPT_EMAIL: "${LETSENCRYPT_EMAIL}"
+
+volumes:
+  rocketchat-db-data:
+  rocketchat-media-data:
+
+networks:
+  rocketchat:
+  backend:
+    external: true
+    name: nginx-proxy_and_companion_backend
