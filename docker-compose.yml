@@ -3,6 +3,8 @@ version: "3.7"
 services:
   rocketchat:
     image: rocket.chat:4.8.4
+    labels:
+      - docker-volume-backup.stop-during-backup=rocketchat
     container_name: rocketchat-app
     depends_on:
       - mongodb
@@ -19,10 +21,14 @@ services:
 
   mongodb:
     image: bitnami/mongodb:4.4.15
+    labels:
+      - docker-volume-backup.stop-during-backup=mongodb
+      - docker-volume-backup.archive-pre=/bin/sh -c 'mongodump -d ${MONGODUMP_URI} --quiet --gzip --archive=/tmp/dumps/rocketchat-db_backup_$$(date "+%Y%m%d_%H%M%S").gz'
     container_name: rocketchat-db
     restart: "${DOCKER_RESTART_POLICY:-unless-stopped}"
     volumes:
       - rocketchat-db-data:/data/mongodb
+      - rocketchat-db-data:/tmp/dumps
     networks:
       - rocketchat
     environment:
@@ -34,6 +40,7 @@ services:
       MONGODB_ADVERTISED_HOSTNAME: ${MONGODB_ADVERTISED_HOSTNAME:-mongodb}
       MONGODB_ENABLE_JOURNAL: ${MONGODB_ENABLE_JOURNAL:-true}
       ALLOW_EMPTY_PASSWORD: ${ALLOW_EMPTY_PASSWORD:-yes}
+      MONGODUMP_URI: "${MONGODUMP_URI:-mongodb://mongodb:27017/rocketchat?replicaSet=rs0}"
 
   rocketchat-gateway:
     image: nginx:1.19-alpine
@@ -50,6 +57,72 @@ services:
       VIRTUAL_HOST: "${VIRTUAL_HOST}"
       LETSENCRYPT_HOST: "${LETSENCRYPT_HOST}"
       LETSENCRYPT_EMAIL: "${LETSENCRYPT_EMAIL}"
+
+  backup_db: &backup_service
+    image: offen/docker-volume-backup:v2.21.0
+    restart: always
+    labels:
+      - docker-volume-backup.archive-pre=/bin/sh -c 'wget ${HEALTHCHECKS_PING_URL} -O /dev/null'
+    environment: &backup_environment
+      BACKUP_CRON_EXPRESSION: ${BACKUP_CRON_EXPRESSION}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS}
+      EXEC_FORWARD_OUTPUT: "true"
+      NOTIFICATION_LEVEL: ${NOTIFICATION_LEVEL}
+      NOTIFICATION_URLS: ${NOTIFICATION_URLS}
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_ENDPOINT: ${AWS_ENDPOINT}
+      AWS_S3_PATH: ${AWS_S3_PATH}
+      LOCAL_BACKUP_LOCATION: ${LOCAL_BACKUP_LOCATION}
+      HEALTHCHECKS_PING_URL: ${HEALTHCHECKS_PING_URL}
+      BACKUP_STOP_CONTAINER_LABEL: mongodb
+      BACKUP_FILENAME: rocketchat-db-backup-%Y-%m-%dT%H-%M-%S.tar.gz
+      BACKUP_LATEST_SYMLINK: rocketchat-db-backup-latest.tar.gz
+      BACKUP_PRUNING_PREFIX: rocketchat-db-backup-
+    volumes:
+      - rocketchat-db-data:/backup/rocketchat-db-backup:ro
+      # Mounting the Docker socket allows the script to stop and restart
+      # the container during backup. You can omit this if you don't want
+      # to stop the container. In case you need to proxy the socket, you can
+      # also provide a location by setting `DOCKER_HOST` in the container
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # If you mount a local directory or volume to `/archive` a local
+      # copy of the backup will be stored there. You can override the
+      # location inside of the container by setting `BACKUP_ARCHIVE`.
+      # You can omit this if you do not want to keep local backups.
+      - ${HOME}/${LOCAL_BACKUP_LOCATION}:/archive
+      #  In case you want to run your cron rules in your local timezone
+      # (respecting DST and similar), you can mount your Docker host's
+      # /etc/timezone and /etc/localtime in read-only mode:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+  backup_backend:
+    <<: *backup_service
+    environment:
+      <<: *backup_environment
+      BACKUP_STOP_CONTAINER_LABEL: rocketchat
+      BACKUP_FILENAME: rocketchat-backend-backup-%Y-%m-%dT%H-%M-%S.tar.gz
+      BACKUP_LATEST_SYMLINK: rocketchat-backend-backup-latest.tar.gz
+      BACKUP_PRUNING_PREFIX: rocketchat-backend-backup-
+    volumes:
+      - rocketchat-media-data:/backup/rocketchat-media-backup:ro
+      # Mounting the Docker socket allows the script to stop and restart
+      # the container during backup. You can omit this if you don't want
+      # to stop the container. In case you need to proxy the socket, you can
+      # also provide a location by setting `DOCKER_HOST` in the container
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # If you mount a local directory or volume to `/archive` a local
+      # copy of the backup will be stored there. You can override the
+      # location inside of the container by setting `BACKUP_ARCHIVE`.
+      # You can omit this if you do not want to keep local backups.
+      - ${HOME}/${LOCAL_BACKUP_LOCATION}:/archive
+      #  In case you want to run your cron rules in your local timezone
+      # (respecting DST and similar), you can mount your Docker host's
+      # /etc/timezone and /etc/localtime in read-only mode:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
 
 volumes:
   rocketchat-db-data:
