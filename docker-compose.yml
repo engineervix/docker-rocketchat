@@ -10,7 +10,7 @@ services:
       - mongodb
     restart: "${DOCKER_RESTART_POLICY:-unless-stopped}"
     volumes:
-      - rocketchat-media-data:/app/uploads
+      - ./data/rocketchat-media-data:/app/uploads
     networks:
       - rocketchat
     environment:
@@ -23,12 +23,12 @@ services:
     image: bitnami/mongodb:4.4.15
     labels:
       - docker-volume-backup.stop-during-backup=mongodb
-      - docker-volume-backup.archive-pre=/bin/sh -c 'mongodump -d ${MONGODUMP_URI} --quiet --gzip --archive=/tmp/dumps/rocketchat-db_backup_$$(date "+%Y%m%d_%H%M%S").gz'
+      - docker-volume-backup.archive-pre=/bin/sh -c 'mongodump --archive="/tmp/dumps/rocketchat-db_backup_$$(date '+%Y%m%d_%H%M%S')" --gzip --db=rocketchat --quiet'
     container_name: rocketchat-db
     restart: "${DOCKER_RESTART_POLICY:-unless-stopped}"
     volumes:
-      - rocketchat-db-data:/data/mongodb
-      - rocketchat-db-data:/tmp/dumps
+      - ./data/rocketchat-db-data:/bitnami/mongodb
+      - ./data/rocketchat-db-data:/tmp/dumps
     networks:
       - rocketchat
     environment:
@@ -40,7 +40,6 @@ services:
       MONGODB_ADVERTISED_HOSTNAME: ${MONGODB_ADVERTISED_HOSTNAME:-mongodb}
       MONGODB_ENABLE_JOURNAL: ${MONGODB_ENABLE_JOURNAL:-true}
       ALLOW_EMPTY_PASSWORD: ${ALLOW_EMPTY_PASSWORD:-yes}
-      MONGODUMP_URI: "${MONGODUMP_URI:-mongodb://mongodb:27017/rocketchat?replicaSet=rs0}"
 
   rocketchat-gateway:
     image: nginx:1.19-alpine
@@ -58,12 +57,12 @@ services:
       LETSENCRYPT_HOST: "${LETSENCRYPT_HOST}"
       LETSENCRYPT_EMAIL: "${LETSENCRYPT_EMAIL}"
 
-  backup_db: &backup_service
+  backup_mongodb: &docker_volume_backup_service
     image: offen/docker-volume-backup:v2.21.0
     restart: always
     labels:
       - docker-volume-backup.archive-pre=/bin/sh -c 'wget ${HEALTHCHECKS_PING_URL} -O /dev/null'
-    environment: &backup_environment
+    environment: &docker_volume_backup_environment
       BACKUP_CRON_EXPRESSION: ${BACKUP_CRON_EXPRESSION}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS}
       EXEC_FORWARD_OUTPUT: "true"
@@ -81,7 +80,7 @@ services:
       BACKUP_LATEST_SYMLINK: rocketchat-db-backup-latest.tar.gz
       BACKUP_PRUNING_PREFIX: rocketchat-db-backup-
     volumes:
-      - rocketchat-db-data:/backup/rocketchat-db-backup:ro
+      - ./data/rocketchat-db-data:/backup/rocketchat-db-backup:ro
       # Mounting the Docker socket allows the script to stop and restart
       # the container during backup. You can omit this if you don't want
       # to stop the container. In case you need to proxy the socket, you can
@@ -98,16 +97,16 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
 
-  backup_backend:
-    <<: *backup_service
+  backup_rocketchat_data:
+    <<: *docker_volume_backup_service
     environment:
-      <<: *backup_environment
+      <<: *docker_volume_backup_environment
       BACKUP_STOP_CONTAINER_LABEL: rocketchat
       BACKUP_FILENAME: rocketchat-backend-backup-%Y-%m-%dT%H-%M-%S.tar.gz
       BACKUP_LATEST_SYMLINK: rocketchat-backend-backup-latest.tar.gz
       BACKUP_PRUNING_PREFIX: rocketchat-backend-backup-
     volumes:
-      - rocketchat-media-data:/backup/rocketchat-media-backup:ro
+      - ./data/rocketchat-media-data:/backup/rocketchat-media-backup:ro
       # Mounting the Docker socket allows the script to stop and restart
       # the container during backup. You can omit this if you don't want
       # to stop the container. In case you need to proxy the socket, you can
@@ -124,9 +123,9 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
 
-volumes:
-  rocketchat-db-data:
-  rocketchat-media-data:
+# volumes:
+#   rocketchat-db-data:
+#   rocketchat-media-data:
 
 networks:
   rocketchat:
