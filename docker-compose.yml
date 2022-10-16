@@ -2,7 +2,7 @@ version: "3.7"
 
 services:
   rocketchat:
-    image: rocket.chat:4.8.4
+    image: rocket.chat:5.2.0
     labels:
       - docker-volume-backup.stop-during-backup=rocketchat
     container_name: rocketchat-app
